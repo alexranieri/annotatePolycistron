@@ -8,6 +8,7 @@ Created on Wed Sep  2 16:22:47 2020
 
 # Imports
 import argparse, os
+import pandas as pd
 
 # Functions
 
@@ -37,15 +38,16 @@ def write_for_sort(file):
     for_sort = open('toSort.gff', 'w')
     for_sort.writelines(file.readlines())
     
-def sort_gff():
+def sort_gff(file):
     """ 
-        Sort the temp GFF file from write_for_sort function using bash sort
-        Input: toSort.gff
+        Sort the temp GFF file using pandas
+        Input: GFF file
         Output: temp sorted GFF file
     """
-    os.system('sort -k1,1 -k4n,4 -k5n,5 toSort.gff > sorted.gff')
-    os.system('rm toSort.gff')
-
+    df = pd.read_csv(file, sep='\t', header=None) # open file as DataFrame
+    sorted_df = df.sort_values([0,3,4]) # sort DataFrame using ChromID, ChromStart and ChromEnd
+    sorted_df.to_csv('sorted.gff', sep ='\t', header = False, index = False) # write to file
+      
 def get_lineFeatures(line):
     """
         Get features of the GFF line. 
@@ -55,13 +57,6 @@ def get_lineFeatures(line):
     feature = line.split("\t") # array with features
     return feature
 
-    feature_type = features[2]
-    if (feature_type in desired_features):
-            # store data for eventual polycistron 
-            currentPC, id_array = storePolycistronData(features)
-    else: # write line in temp_out and continue to read next line
-            temp_out.write(line)
-            line = sorted_input.readline()
 def storePolycistronData(features):
     """
         Get features array of line. 
@@ -81,26 +76,27 @@ def processEventualPolycistron(currentPC, polType, id_array, file):
     """
     polType = 'Polycistron-' + currentPC[2]
     currentPC[2] = polType
+    count_id = str(len(id_array))
     if (polType == 'Polycistron-CDS'):
         global CDS
         CDS += 1
-        description = 'ID=' + polType + '_' + str(CDS) + ';Note='
+        description = 'ID=' + polType + '_' + str(CDS) + ';contentCount=' + count_id + ';content='
     elif(polType == 'Polycistron-ncRNA'):
         global ncRNA
         ncRNA += 1
-        description = 'ID=' + polType + '_' + str(ncRNA) + ';Note='
+        description = 'ID=' + polType + '_' + str(ncRNA) + ';contentCount=' + count_id + ';content='
     elif(polType == 'Polycistron-rRNA'):
         global rRNA
         rRNA += 1
-        description = 'ID=' + polType + '_' + str(rRNA) + ';Note='
+        description = 'ID=' + polType + '_' + str(rRNA) + ';contentCount=' + count_id + ';content='
     elif(polType == 'Polycistron-snoRNA'):
         global snoRNA
         snoRNA += 1
-        description = 'ID=' + polType + '_' + str(snoRNA) + ';Note='
+        description = 'ID=' + polType + '_' + str(snoRNA) + ';contentCount=' + count_id + ';content='
     else:
         global tRNA
         tRNA += 1
-        description = 'ID=' + polType + '_' + str(tRNA) + ';Note='
+        description = 'ID=' + polType + '_' + str(tRNA) + ';contentCount=' + count_id + ';content='
     currentPC[1] = 'annotatePolycistron'
     id_array = ','.join(id_array)
     description = description + id_array
@@ -143,11 +139,13 @@ if __name__ == '__main__':
     
     # sort the file created with the write_for_sort function
     print("Sorting input file...")
-    sort_gff()  
+    toSort = 'toSort.gff'
+    sort_gff(toSort)  
+    os.remove('toSort.gff')
     
     # start read the sorted temp file
     sorted_input = open('sorted.gff', 'r')
-    temp_out = open('temp.gff', 'a') # open temp_output file
+    temp_out = open('temp_2.gff', 'a') # open temp_output file
     line = sorted_input.readline() # read initial line 
     desired_features = ['CDS','ncRNA','rRNA','snoRNA','tRNA']
     # counters
@@ -160,18 +158,21 @@ if __name__ == '__main__':
     # get initial polycistron
     features = get_lineFeatures(line) # recover features of a line
     # check if line contains desired features to process
-    feature_type = features[2]        
-    if (feature_type in desired_features):
-        # store data for eventual polycistron 
-        processingPC, processingId_array = storePolycistronData(features)
-        processingPolType = processingPC[2]
-        processingPolStrand = processingPC[6]
-        temp_out.write(line)
-        line = sorted_input.readline()                     
-    else: # write line in temp_out and continue to read next line
-        temp_out.write(line)
-        line = sorted_input.readline()
-        
+    feature_type = features[2]   
+    while (feature_type not in desired_features):
+        features = get_lineFeatures(line) 
+        feature_type = features[2]
+        if (feature_type in desired_features):
+            # store data for eventual polycistron 
+            processingPC, processingId_array = storePolycistronData(features)
+            processingPolType = processingPC[2]
+            processingPolStrand = processingPC[6]
+            temp_out.write(line)
+            line = sorted_input.readline()                     
+        else: # write line in temp_out and continue to read next line
+            temp_out.write(line)
+            line = sorted_input.readline()
+ 
     while line: # loop trough all lines in sorted input file
         features = get_lineFeatures(line) # recover features of a line
         # check if line contains desired features to process
@@ -181,8 +182,8 @@ if __name__ == '__main__':
             # If one of those is different, thre is an eventual polycistron boundary.
             chrom = features[0]
             strand = features[6]
-            temp_out.write(line)
             if (chrom != processingPC[0] or feature_type != processingPolType or strand != processingPolStrand):
+                temp_out.write(line)
                 processEventualPolycistron(processingPC, processingPolType, processingId_array, temp_out) # write to file 
                 # store data for new eventual polycistron and read next line
                 processingPC, processingId_array = storePolycistronData(features)
@@ -190,12 +191,12 @@ if __name__ == '__main__':
                 processingPolStrand = processingPC[6]
                 line = sorted_input.readline()
             else: # we need to update the processing polycistron and read next line
+                temp_out.write(line)
                 processingPC[4] = features[4] # update end
                 # append feature id to polycistron Note
                 idToAppend = features[-1].split(';')
                 idToAppend = idToAppend[0].replace('ID=','')
                 processingId_array.append(idToAppend)
-                temp_out.write(line)
                 line = sorted_input.readline()
         else: # write line in temp_out and continue to read next line
             temp_out.write(line)
@@ -206,8 +207,16 @@ if __name__ == '__main__':
     # Create final output file and cleaning
     temp_out.close()
     sorted_input.close()
-    os.system('mv temp.gff ' + args.gff_out)
-    os.system('rm sorted.gff')
+    finalSort = 'temp_2.gff'
+    sort_gff(finalSort)
+    file = open('sorted.gff', 'r')
+    output = open('temp.gff', 'a')
+    output.writelines(file.readlines())
+    file.close()
+    output.close()
+    os.rename('temp.gff', args.gff_out)
+    os.remove('sorted.gff')
+    os.remove('temp_2.gff')
     print("Number of annotated features:")
     print("CDS: " + str(CDS))
     print("tRNA: " + str(tRNA))
